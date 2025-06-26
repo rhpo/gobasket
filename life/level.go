@@ -9,8 +9,9 @@ type Level struct {
 	Map      Map
 	MapItems MapItems
 
-	Init    func(world *World)
-	Tick    func(ld LoopData)
-	Render  func(screen *ebiten.Image)
-	Destroy func()
+	Init      func(world *World)
+	Tick      func(ld LoopData)
+	Render    func(screen *ebiten.Image)
+	OnMount   func()
+	OnDestroy func(world *World)
 }

@@ -19,7 +19,36 @@ type ContactListener struct {
 }
 
 func (cl *ContactListener) PreSolve(contact box2d.B2ContactInterface, oldManifold box2d.B2Manifold) {
-	// No-op, required by Box2D interface (No-op = no-operation)
+	// This is where we actually disable contacts between shapes that shouldn't collide
+	fixtureA := contact.GetFixtureA()
+	fixtureB := contact.GetFixtureB()
+
+	if fixtureA == nil || fixtureB == nil {
+		return
+	}
+
+	bodyA := fixtureA.GetBody()
+	bodyB := fixtureB.GetBody()
+
+	// Find shapes
+	var shapeA, shapeB *Shape
+	for _, obj := range cl.world.Objects {
+		if obj.Body == bodyA {
+			shapeA = obj
+		} else if obj.Body == bodyB {
+			shapeB = obj
+		}
+	}
+
+	if shapeA == nil || shapeB == nil {
+		return
+	}
+
+	// Check if these shapes should NOT collide with each other
+	if !shapeA.ShouldCollideWith(shapeB) || !shapeB.ShouldCollideWith(shapeA) {
+		// Disable the contact - this prevents physical collision response
+		contact.SetEnabled(false)
+	}
 }
 
 func (cl *ContactListener) PostSolve(contact box2d.B2ContactInterface, impulse *box2d.B2ContactImpulse) {
@@ -151,6 +180,124 @@ type World struct {
 	pendingLevelSwitch *int
 	collisionQueue     []CollisionEvent
 	collisionMutex     sync.Mutex
+}
+
+// SetTagCollisionFilter sets collision filtering for all shapes with a specific tag
+func (w *World) SetTagCollisionFilter(tag string, collidesWith []string) {
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	taggedShapes := w.GetElementsByTagName(tag)
+	if len(taggedShapes) == 0 {
+		return
+	}
+
+	// Generate a unique group index for this tag
+	groupIndex := int16(w.getTagGroupIndex(tag))
+
+	// If collidesWith is empty, prevent collision with everything
+	if len(collidesWith) == 0 {
+		groupIndex = -groupIndex // Negative group index prevents collision
+	}
+
+	// Apply filter to all shapes with the tag
+	for _, shape := range taggedShapes {
+		if shape.Body != nil {
+			fixture := shape.Body.GetFixtureList()
+			if fixture != nil {
+				filter := fixture.GetFilterData()
+				filter.GroupIndex = groupIndex
+				fixture.SetFilterData(filter)
+			}
+		}
+	}
+
+	// If specific tags are provided, set up category/mask filtering
+	if len(collidesWith) > 0 {
+		w.setupCategoryMaskFiltering(tag, collidesWith)
+	}
+}
+
+// setupCategoryMaskFiltering sets up more complex filtering using categories and masks
+func (w *World) setupCategoryMaskFiltering(tag string, collidesWith []string) {
+	// This is a more advanced filtering system using categories and masks
+	// For now, we'll use the simpler group-based approach
+
+	taggedShapes := w.GetElementsByTagName(tag)
+
+	// Create a category bit for this tag
+	categoryBit := uint16(1 << w.getTagCategoryBit(tag))
+
+	// Create mask bits for tags it should collide with
+	maskBits := uint16(0)
+	for _, collidesWithTag := range collidesWith {
+		maskBits |= uint16(1 << w.getTagCategoryBit(collidesWithTag))
+	}
+
+	// Apply the filter
+	for _, shape := range taggedShapes {
+		if shape.Body != nil {
+			fixture := shape.Body.GetFixtureList()
+			if fixture != nil {
+				filter := fixture.GetFilterData()
+				filter.CategoryBits = categoryBit
+				filter.MaskBits = maskBits
+				fixture.SetFilterData(filter)
+			}
+		}
+	}
+}
+
+// getTagGroupIndex generates a unique group index for a tag
+func (w *World) getTagGroupIndex(tag string) int {
+	hash := 0
+	for _, char := range tag {
+		hash = hash*31 + int(char)
+	}
+	return (hash % 32000) + 1
+}
+
+// getTagCategoryBit generates a category bit for a tag (returns the actual bit value, not position)
+func (w *World) getTagCategoryBit(tag string) uint16 {
+	hash := 0
+	for _, char := range tag {
+		hash = hash*31 + int(char)
+	}
+	// Use bits 1-15 (bit 0 is reserved for default)
+	bitPosition := (hash % 15) + 1
+	return uint16(1 << bitPosition)
+}
+
+// DisableCollisionBetweenTags disables collision between two tags
+func (w *World) DisableCollisionBetweenTags(tagA, tagB string) {
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	shapesA := w.GetElementsByTagName(tagA)
+	shapesB := w.GetElementsByTagName(tagB)
+
+	// Use our NotCollideWith method for each pair
+	for _, shapeA := range shapesA {
+		for _, shapeB := range shapesB {
+			shapeA.NotCollideWith(shapeB)
+		}
+	}
+}
+
+// EnableCollisionBetweenTags re-enables collision between two tags
+func (w *World) EnableCollisionBetweenTags(tagA, tagB string) {
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	shapesA := w.GetElementsByTagName(tagA)
+	shapesB := w.GetElementsByTagName(tagB)
+
+	// Use our RestoreCollisionWith method for each pair
+	for _, shapeA := range shapesA {
+		for _, shapeB := range shapesB {
+			shapeA.RestoreCollisionWith(shapeB)
+		}
+	}
 }
 
 // WorldProps contains properties for creating a world
@@ -361,6 +508,15 @@ func (w *World) SelectLevel(index int) {
 		return
 	}
 
+	// Set current level
+	w.CurrentLevel = index
+	level := w.Levels[index]
+
+	if level.OnDestroy != nil {
+		// Call OnDestroy for the current level
+		level.OnDestroy(w)
+	}
+
 	// Clear all existing objects
 	w.mutex.Lock()
 
@@ -372,10 +528,6 @@ func (w *World) SelectLevel(index int) {
 	}
 	w.Objects = make([]*Shape, 0)
 	w.mutex.Unlock()
-
-	// Set current level
-	w.CurrentLevel = index
-	level := w.Levels[index]
 
 	// Set up level functions
 	if level.Tick != nil {
@@ -397,6 +549,10 @@ func (w *World) SelectLevel(index int) {
 
 	// Generate level from map
 	w.GenerateLevelFromMap(level.Map, level.MapItems)
+
+	if level.OnMount != nil {
+		level.OnMount()
+	}
 
 }
 
@@ -533,7 +689,7 @@ func (w *World) createPhysicsBody(object *Shape) {
 
 	density := 0.0
 	if !object.Physics {
-		density = 1.0
+		density = 0.0
 	}
 
 	fixture := body.CreateFixture(shape, density)
@@ -545,6 +701,14 @@ func (w *World) createPhysicsBody(object *Shape) {
 	fixture.SetFriction(object.Friction)
 	fixture.SetRestitution(object.Rebound)
 
+	// Initialize collision filter with default values
+	filter := fixture.GetFilterData()
+	filter.CategoryBits = 1  // Default category
+	filter.MaskBits = 0xFFFF // Collide with everything by default
+	filter.GroupIndex = 0    // No group
+
+	fixture.SetFilterData(filter)
+
 	object.Body = body
 }
 
@@ -555,8 +719,10 @@ func (w *World) GenerateLevelFromMap(levelMap Map, objects map[string]func(posit
 
 	rows := len(levelMap)
 	cols := len(levelMap[0])
-	tileWidth := float64(w.Width / cols)
-	tileHeight := float64(w.Height / rows)
+	tileWidth := float64(w.Width) / float64(cols)
+	tileHeight := float64(w.Height) / float64(rows)
+
+	const overlap = 0.5 // small value to cover precision gaps
 
 	for y, row := range levelMap {
 		for x, ch := range row {
@@ -564,11 +730,13 @@ func (w *World) GenerateLevelFromMap(levelMap Map, objects map[string]func(posit
 			if !ok {
 				continue
 			}
+
+			// Slightly overlap tiles to hide gaps
 			pos := Vector2{
-				X: float64(x) * tileWidth,
-				Y: float64(y) * tileHeight,
+				X: float64(x)*tileWidth - overlap/2,
+				Y: float64(y)*tileHeight - overlap/2,
 			}
-			fn(pos, tileWidth, tileHeight)
+			fn(pos, tileWidth+overlap, tileHeight+overlap)
 		}
 	}
 }
@@ -657,7 +825,7 @@ func (w *World) handleMouseDown(x, y float64) {
 	for _, obj := range hoveredObjects {
 		if !obj.Clicked {
 			obj.Clicked = true
-			obj.Emit(EventMouseDown, map[string]float64{"x": x, "y": y})
+			obj.Emit(EventMouseDown, Vector2{X: x, Y: y})
 		}
 	}
 
@@ -669,8 +837,8 @@ func (w *World) handleMouseDown(x, y float64) {
 func (w *World) handleMouseUp(x, y float64) {
 	hoveredObjects := w.HoveredObjects()
 	for _, obj := range hoveredObjects {
-		obj.Emit(EventMouseUp, map[string]float64{"x": x, "y": y})
-		obj.Emit(EventClick, map[string]float64{"x": x, "y": y})
+		obj.Emit(EventMouseUp, Vector2{X: x, Y: y})
+		obj.Emit(EventClick, Vector2{X: x, Y: y})
 		if obj.Clicked {
 			obj.Clicked = false
 		}

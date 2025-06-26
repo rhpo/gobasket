@@ -14,14 +14,14 @@ import (
 var assets embed.FS
 
 const (
-	PlayerBallGap = 1.8 * life.PTM
+	PlayerBallGap = 0
 )
 
 var (
 	player       *life.Shape
 	playerEntity *entities.PlayerEntity
-	ball         *life.Shape          // Assuming ball is defined somewhere in your code
-	ballEntity   *entities.BallEntity // Assuming ballEntity is defined somewhere in your code
+	ball         *life.Shape
+	ballEntity   *entities.BallEntity
 	world        *life.World
 )
 
@@ -42,7 +42,7 @@ var One life.Level = life.Level{
 	MapItems: life.MapItems{
 		"#": func(position life.Vector2, width float64, height float64) {
 			s := life.NewShape(&life.ShapeProps{
-				Name:         "wall",
+				Tag:          "wall",
 				Type:         life.ShapeRectangle,
 				Pattern:      life.PatternColor,
 				Physics:      false,
@@ -66,8 +66,8 @@ var One life.Level = life.Level{
 				Type:         life.ShapeRectangle,
 				Pattern:      life.PatternColor,
 				Physics:      false,
-				IsBody:       false,                                    // ORANGE COLOR
-				Background:   color.RGBA{R: 255, G: 165, B: 0, A: 255}, // Orange color for wall
+				IsBody:       false,
+				Background:   color.RGBA{R: 255, G: 165, B: 0, A: 255},
 				X:            position.X,
 				Y:            position.Y,
 				Width:        width,
@@ -104,7 +104,7 @@ var One life.Level = life.Level{
 			s := life.NewShape(&life.ShapeProps{
 				Type:         life.ShapeRectangle,
 				Pattern:      life.PatternColor,
-				Background:   color.RGBA{R: 255, G: 165, B: 0, A: 255}, // Orange color for wall
+				Background:   color.RGBA{R: 255, G: 165, B: 0, A: 255},
 				X:            position.X,
 				Y:            position.Y,
 				Width:        width,
@@ -136,7 +136,6 @@ var One life.Level = life.Level{
 		world = world_
 
 		// Load audio files
-		// Note: You'll need to add actual audio files to your assets folder
 		world.LoadSound("jump", assets, "assets/sounds/jump.wav")
 		world.LoadSound("level_complete", assets, "assets/sounds/complete.wav")
 		world.LoadMusic("background", assets, "assets/sounds/background.mp3")
@@ -147,13 +146,24 @@ var One life.Level = life.Level{
 		ballEntity = entities.NewBallEntity(world, assets)
 		ball = ballEntity.Shape
 
+		// This should now work correctly - only disable collision between player and ball
+		// player.NotCollideWith(ball)
+
 		// Play background music
-		world.PlayMusic("background")
+		// world.PlayMusic("background")
+
+		world.OnMouseDown = func(x, y float64) {
+			ball.SetX(x)
+			ball.SetY(y)
+		}
 	},
 
 	Tick: func(ld life.LoopData) {
 		playerEntity.Update(ld)
+		ballEntity.Update(ld)
+	},
 
+	OnMount: func() {
 		ballPosX := player.X + player.Width + PlayerBallGap
 		ballPosY := player.Y + player.Height/2 - ball.Height/2
 
@@ -163,6 +173,14 @@ var One life.Level = life.Level{
 
 		ball.SetX(ballPosX)
 		ball.SetY(float64(ballPosY))
+
+		world.On(life.EventClick, func(data any) {
+			pos := data.(life.Vector2)
+
+			ball.SetX(pos.X)
+			ball.SetY(pos.Y)
+		})
+
 	},
 
 	Render: func(screen *ebiten.Image) {
@@ -178,7 +196,7 @@ var One life.Level = life.Level{
 		}
 	},
 
-	Destroy: func() {
+	OnDestroy: func(world *life.World) {
 		world.StopMusic()
 	},
 }

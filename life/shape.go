@@ -15,6 +15,11 @@ type Border struct {
 	Pattern    PatternType
 }
 
+// Helper function to create Box2D vector
+func Box2dVec2(x, y float64) box2d.B2Vec2 {
+	return box2d.MakeB2Vec2(x, y)
+}
+
 // Shape represents a game object
 type Shape struct {
 	*EventEmitter
@@ -77,6 +82,9 @@ type Shape struct {
 
 	directions *Axis
 	Ghost      bool // Indicates if the shape is a ghost (not colliding with other shapes)
+
+	// Collision filtering - simple approach
+	noCollideWith map[string]bool // Track shapes this shouldn't collide with
 }
 
 // NewShape creates a new shape
@@ -118,9 +126,9 @@ func NewShape(props *ShapeProps) *Shape {
 	}
 	if props.Radius == 0 && props.Type == ShapeCircle {
 		if props.Width != 0 {
-			props.Radius = props.Width
+			props.Radius = props.Width / 2
 		} else if props.Height != 0 {
-			props.Radius = props.Height
+			props.Radius = props.Height / 2
 		} else {
 			props.Radius = 20
 		}
@@ -157,11 +165,13 @@ func NewShape(props *ShapeProps) *Shape {
 		Flip:                  props.Flip,
 		directions:            &Axis{},
 		Ghost:                 props.Ghost,
+		noCollideWith:         make(map[string]bool),
 	}
 
-	if props.Radius > 0 {
-		shape.Width = props.Radius
-		shape.Height = props.Radius
+	// Fix: For circles, width and height should be diameter (2 * radius)
+	if props.Radius > 0 && props.Type == ShapeCircle {
+		shape.Width = props.Radius * 2
+		shape.Height = props.Radius * 2
 	}
 
 	return shape
@@ -303,7 +313,7 @@ func (s *Shape) SetPosition(x, y float64) {
 func (s *Shape) SetRotation(angle float64) {
 	s.RotationAngle = angle
 
-	s.Body.SetTransform(box2d.MakeB2Vec2(PixelsToMeters(s.X), PixelsToMeters(s.Y)), angle*Deg)
+	s.Body.SetTransform(s.Body.GetPosition(), angle*Deg)
 }
 
 // SetScale sets the scale of the shape
@@ -443,6 +453,7 @@ func (s *Shape) drawCircle(screen *ebiten.Image) {
 			imgWidth := float64(imgBounds.Dx())
 			imgHeight := float64(imgBounds.Dy())
 
+			// For circles with images, use the circle's diameter as the target size
 			s.applyTransformations(op, imgWidth, imgHeight)
 			screen.DrawImage(s.Image, op)
 		}
@@ -633,4 +644,64 @@ func (s *Shape) Move(direction string) {
 	case "right":
 		s.SetXVelocity(s.Speed)
 	}
+}
+
+// NotCollideWith prevents this shape from colliding with another specific shape
+// This is the SIMPLE approach - just track which shapes shouldn't collide
+func (s *Shape) NotCollideWith(other *Shape) {
+	s.requireInit()
+	other.requireInit()
+
+	// Add to our no-collide list for tracking
+	s.noCollideWith[other.ID] = true
+	other.noCollideWith[s.ID] = true
+}
+
+// RestoreCollisionWith restores collision between this shape and another specific shape
+func (s *Shape) RestoreCollisionWith(other *Shape) {
+	s.requireInit()
+	other.requireInit()
+
+	// Remove from no-collide list
+	delete(s.noCollideWith, other.ID)
+	delete(other.noCollideWith, s.ID)
+}
+
+// NotCollideWithTag prevents this shape from colliding with all shapes that have the specified tag
+func (s *Shape) NotCollideWithTag(tag string) {
+	s.requireInit()
+
+	if s.world == nil {
+		return
+	}
+
+	// Get all shapes with the specified tag
+	taggedShapes := s.world.GetElementsByTagName(tag)
+
+	// Apply NotCollideWith to each tagged shape
+	for _, taggedShape := range taggedShapes {
+		s.NotCollideWith(taggedShape)
+	}
+}
+
+// RestoreCollisionWithTag restores collision between this shape and all shapes with the specified tag
+func (s *Shape) RestoreCollisionWithTag(tag string) {
+	s.requireInit()
+
+	if s.world == nil {
+		return
+	}
+
+	// Get all shapes with the specified tag
+	taggedShapes := s.world.GetElementsByTagName(tag)
+
+	// Restore collision with each tagged shape
+	for _, taggedShape := range taggedShapes {
+		s.RestoreCollisionWith(taggedShape)
+	}
+}
+
+// ShouldCollideWith checks if this shape should collide with another shape
+func (s *Shape) ShouldCollideWith(other *Shape) bool {
+	return !s.noCollideWith[other.ID]
 }
