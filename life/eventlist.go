@@ -1,6 +1,5 @@
 package life
 
-// Event types
 type EventType string
 
 const (

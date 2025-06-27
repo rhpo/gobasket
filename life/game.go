@@ -4,12 +4,10 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Game implements ebiten.Game interface
 type Game struct {
 	world *World
 }
 
-// NewGame creates a new game instance
 func NewGame(world *World) *Game {
 	return &Game{
 		world: world,
@@ -34,8 +32,6 @@ func (g *Game) Run() error {
 	ebiten.SetWindowTitle(g.world.Title)
 
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-
-	// g.world.Update()
 
 	if g.world.Init != nil {
 		g.world.SelectLevel(0)

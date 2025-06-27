@@ -4,11 +4,10 @@ import (
 	"boughtnine/life"
 )
 
-// NewEnemy creates a new enemy instance
 func NewEnemy(world *life.World, optionalProps ...*life.ShapeProps) *life.Shape {
 	imgWidth := 384
 	imgHeight := 832
-	spriteSheet, _ := life.LoadImage("assets/walk.png") // replace with your file path
+	spriteSheet, _ := life.LoadImage("assets/walk.png")
 	sprites := life.ExtractSprites(spriteSheet, float32(imgWidth)/6, float32(imgHeight)/13, 0, 0, 0, 0)
 
 	defaultProps := &life.ShapeProps{
@@ -23,9 +22,8 @@ func NewEnemy(world *life.World, optionalProps ...*life.ShapeProps) *life.Shape 
 		Rebound:  0,
 	}
 
-	// Merge optional properties with default properties
 	if len(optionalProps) > 0 && optionalProps[0] != nil {
-		// Manually merge fields from optionalProps[0] into defaultProps if they are non-zero values
+
 		if optionalProps[0].Type != "" {
 			defaultProps.Type = optionalProps[0].Type
 		}
@@ -53,11 +51,9 @@ func NewEnemy(world *life.World, optionalProps ...*life.ShapeProps) *life.Shape 
 
 	enemy := life.NewShape(defaultProps)
 
-	// Set default properties for the enemy
 	enemy.Friction = 0
 	enemy.Rebound = 1
 
-	// Register the enemy with the world
 	world.Register(enemy)
 
 	return enemy

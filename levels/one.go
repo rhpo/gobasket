@@ -4,6 +4,7 @@ import (
 	"boughtnine/entities"
 	"boughtnine/life"
 	"embed"
+	"fmt"
 	"image/color"
 	"time"
 
@@ -20,12 +21,41 @@ const (
 var (
 	player       *life.Shape
 	playerEntity *entities.PlayerEntity
-	ball         *life.Shape
-	ballEntity   *entities.BallEntity
-	world        *life.World
+
+	enemy       *life.Shape
+	enemyEntity *entities.PlayerEntity
+
+	ball       *life.Shape
+	ballEntity *entities.BallEntity
+	world      *life.World
+
+	attached bool = true
+	pressed  bool = false
+	launched bool = false
+
+	background, floor *ebiten.Image
+
+	ld life.LoopData
 )
 
 var One life.Level = life.Level{
+
+	Init: func(w *life.World) {
+		world = w
+
+		LoadResources()
+
+		playerEntity = entities.NewPlayerEntity(world, assets)
+		player = playerEntity.Shape
+
+		ballEntity = entities.NewBallEntity(world, assets)
+		ball = ballEntity.Shape
+
+		player.NotCollideWith(ball)
+
+		world.PlayMusic("background")
+
+	},
 
 	Map: life.Map{
 		"#############################",
@@ -35,7 +65,7 @@ var One life.Level = life.Level{
 		"''''''                      #",
 		"#                           #",
 		"#                           #",
-		"#                           #",
+		"#        !                  #",
 		"'''''''''''''''''''''''''''''",
 	},
 
@@ -44,17 +74,17 @@ var One life.Level = life.Level{
 			s := life.NewShape(&life.ShapeProps{
 				Tag:          "wall",
 				Type:         life.ShapeRectangle,
-				Pattern:      life.PatternColor,
+				Pattern:      life.PatternImage,
 				Physics:      false,
 				IsBody:       false,
-				Background:   color.Black,
+				Image:        floor,
 				X:            position.X,
 				Y:            position.Y,
-				Width:        width,
+				Width:        height,
 				Height:       height,
-				Friction:     0.5,
-				Rebound:      0,
-				RotationLock: true,
+				Friction:     0.6,
+				Rebound:      0.3,
+				RotationLock: false,
 			})
 
 			world.Register(s)
@@ -64,10 +94,10 @@ var One life.Level = life.Level{
 			s := life.NewShape(&life.ShapeProps{
 				Name:         "wall",
 				Type:         life.ShapeRectangle,
-				Pattern:      life.PatternColor,
+				Pattern:      life.PatternImage,
 				Physics:      false,
 				IsBody:       false,
-				Background:   color.RGBA{R: 255, G: 165, B: 0, A: 255},
+				Image:        floor,
 				X:            position.X,
 				Y:            position.Y,
 				Width:        width,
@@ -84,13 +114,13 @@ var One life.Level = life.Level{
 			s := life.NewShape(&life.ShapeProps{
 				Tag:          "ground",
 				Type:         life.ShapeRectangle,
-				Pattern:      life.PatternColor,
+				Pattern:      life.PatternImage,
 				Physics:      false,
 				IsBody:       false,
-				Background:   color.Black,
+				Image:        floor,
 				X:            position.X,
 				Y:            position.Y,
-				Width:        width,
+				Width:        height,
 				Height:       height,
 				Friction:     0.5,
 				Rebound:      0,
@@ -98,6 +128,15 @@ var One life.Level = life.Level{
 			})
 
 			world.Register(s)
+		},
+
+		"!": func(position life.Vector2, width float64, height float64) {
+			enemyEntity = entities.NewPlayerEntity(world, assets)
+			enemy = enemyEntity.Shape
+
+			enemy.SetX(position.X)
+			enemy.SetY(position.Y)
+
 		},
 
 		"P": func(position life.Vector2, width float64, height float64) {
@@ -118,7 +157,7 @@ var One life.Level = life.Level{
 
 				OnCollisionFunc: func(who *life.Shape) {
 					if who == ball {
-						panic("You won!")
+						world.PlaySound("level_complete")
 					}
 				},
 			})
@@ -132,55 +171,66 @@ var One life.Level = life.Level{
 		},
 	},
 
-	Init: func(world_ *life.World) {
-		world = world_
+	Tick: func(ld_ life.LoopData) {
+		ld = ld_
 
-		// Load audio files
-		world.LoadSound("jump", assets, "assets/sounds/jump.wav")
-		world.LoadSound("level_complete", assets, "assets/sounds/complete.wav")
-		world.LoadMusic("background", assets, "assets/sounds/background.mp3")
-
-		playerEntity = entities.NewPlayerEntity(world, assets)
-		player = playerEntity.Shape
-
-		ballEntity = entities.NewBallEntity(world, assets)
-		ball = ballEntity.Shape
-
-		// This should now work correctly - only disable collision between player and ball
-		// player.NotCollideWith(ball)
-
-		// Play background music
-		// world.PlayMusic("background")
-
-		world.OnMouseDown = func(x, y float64) {
-			ball.SetX(x)
-			ball.SetY(y)
-		}
-	},
-
-	Tick: func(ld life.LoopData) {
 		playerEntity.Update(ld)
 		ballEntity.Update(ld)
-	},
 
-	OnMount: func() {
-		ballPosX := player.X + player.Width + PlayerBallGap
-		ballPosY := player.Y + player.Height/2 - ball.Height/2
+		enemy.Follow(player)
 
-		if player.Flip.X {
-			ballPosX = player.X - ball.Width - PlayerBallGap
+		if pressed {
+			if player.Flip.X {
+				player.Flip.X = false
+			}
 		}
 
-		ball.SetX(ballPosX)
-		ball.SetY(float64(ballPosY))
+		if attached && !pressed {
+			ball.SetX(player.X + player.Width + PlayerBallGap)
+			ball.SetY(player.Y + player.Height/2 - ball.Height/2)
 
-		world.On(life.EventClick, func(data any) {
-			pos := data.(life.Vector2)
+			if player.Flip.X {
+				ball.SetX(player.X - ball.Width - PlayerBallGap)
+			}
+		} else if attached && pressed {
 
-			ball.SetX(pos.X)
-			ball.SetY(pos.Y)
-		})
+			ball.SetX(player.X + player.Width + PlayerBallGap)
+			ball.SetY(player.Y - ball.Height/2)
 
+			if player.Flip.X {
+				ball.SetX(player.X - ball.Width - PlayerBallGap)
+			}
+		}
+
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+			if !pressed {
+
+				pressed = true
+			}
+		} else if pressed {
+			attached = false
+			pressed = false
+		}
+
+		toLaunch := !attached && !launched
+		if toLaunch {
+			x := world.Mouse.X - player.X
+			y := world.Mouse.Y - player.Y
+			ball.SetVelocity(x*ball.Speed, y*ball.Speed)
+			launched = true
+		}
+
+		if ebiten.IsKeyPressed(ebiten.KeyE) && !attached {
+			// if ball is close, AABB collision
+			if ball.X+ball.Width > player.X && ball.X < player.X+player.Width &&
+				ball.Y+ball.Height > player.Y && ball.Y < player.Y+player.Height {
+				attached = true
+				launched = false
+				pressed = false
+
+				ball.Body.SetAngularVelocity(0)
+			}
+		}
 	},
 
 	Render: func(screen *ebiten.Image) {
@@ -193,6 +243,38 @@ var One life.Level = life.Level{
 				Y:     player.Y - 5,
 				Color: color.White,
 			})
+		}
+
+		life.DrawText(screen, &life.TextProps{
+			Text:  fmt.Sprint("FPS: ", int(1/ld.Delta)),
+			X:     0,
+			Y:     0,
+			Color: color.White,
+		})
+
+		world.Pen(life.ShapeRectangle, &life.ShapeProps{
+			X:       0,
+			Y:       0,
+			Width:   float64(world.Width),
+			Height:  float64(world.Height),
+			Pattern: life.PatternImage,
+			Image:   background,
+			ZIndex:  -1000,
+		})
+
+		if ball.X+ball.Width > player.X && ball.X < player.X+player.Width &&
+			ball.Y+ball.Height > player.Y && ball.Y < player.Y+player.Height &&
+			!attached {
+			life.DrawText(screen, &life.TextProps{
+				Text:  "Press E to pick up the ball",
+				X:     ball.X - float64(len("Press E to pick up the ball"))/2,
+				Y:     ball.Y - 5,
+				Color: color.White,
+			})
+		}
+
+		if pressed && !launched {
+			world.Line(ball.X+ball.Width/2, ball.Y+ball.Height/2, world.Mouse.X, world.Mouse.Y, color.RGBA{R: 255}, 1.0)
 		}
 	},
 

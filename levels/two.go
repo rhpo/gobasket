@@ -53,7 +53,7 @@ var Two life.Level = life.Level{
 			s := life.NewShape(&life.ShapeProps{
 				Type:       life.ShapeRectangle,
 				Pattern:    life.PatternColor,
-				Background: color.RGBA{R: 255, G: 0, B: 0, A: 255}, // Red color for finish line
+				Background: color.RGBA{R: 255, G: 0, B: 0, A: 255},
 				X:          position.X,
 				Y:          position.Y,
 				Width:      width,

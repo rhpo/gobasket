@@ -6,7 +6,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Animation handles sprite animations
 type Animation struct {
 	target       *Shape
 	frames       []*ebiten.Image
@@ -19,7 +18,6 @@ type Animation struct {
 	onFinish     func(*Shape)
 }
 
-// NewAnimation creates a new animation
 func NewAnimation(target *Shape, speed time.Duration, loop bool, frames ...*ebiten.Image) *Animation {
 	if speed == 0 {
 		speed = 100 * time.Millisecond
@@ -39,7 +37,6 @@ func NewAnimation(target *Shape, speed time.Duration, loop bool, frames ...*ebit
 	return anim
 }
 
-// Start begins the animation
 func (a *Animation) Start() *Animation {
 	if a.isPlaying {
 		return a
@@ -79,7 +76,6 @@ func (a *Animation) Start() *Animation {
 	return a
 }
 
-// Stop stops the animation
 func (a *Animation) Stop() *Animation {
 	a.isPlaying = false
 	if a.ticker != nil {
@@ -89,13 +85,11 @@ func (a *Animation) Stop() *Animation {
 	return a
 }
 
-// OnFinish sets the callback for when animation finishes
 func (a *Animation) OnFinish(callback func(*Shape)) *Animation {
 	a.onFinish = callback
 	return a
 }
 
-// IsPlaying returns whether the animation is currently playing
 func (a *Animation) IsPlaying() bool {
 	return a.isPlaying
 }

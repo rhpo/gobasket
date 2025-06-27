@@ -19,7 +19,7 @@ type ContactListener struct {
 }
 
 func (cl *ContactListener) PreSolve(contact box2d.B2ContactInterface, oldManifold box2d.B2Manifold) {
-	// This is where we actually disable contacts between shapes that shouldn't collide
+
 	fixtureA := contact.GetFixtureA()
 	fixtureB := contact.GetFixtureB()
 
@@ -30,7 +30,6 @@ func (cl *ContactListener) PreSolve(contact box2d.B2ContactInterface, oldManifol
 	bodyA := fixtureA.GetBody()
 	bodyB := fixtureB.GetBody()
 
-	// Find shapes
 	var shapeA, shapeB *Shape
 	for _, obj := range cl.world.Objects {
 		if obj.Body == bodyA {
@@ -44,30 +43,16 @@ func (cl *ContactListener) PreSolve(contact box2d.B2ContactInterface, oldManifol
 		return
 	}
 
-	// Check if these shapes should NOT collide with each other
 	if !shapeA.ShouldCollideWith(shapeB) || !shapeB.ShouldCollideWith(shapeA) {
-		// Disable the contact - this prevents physical collision response
+
 		contact.SetEnabled(false)
 	}
 }
 
 func (cl *ContactListener) PostSolve(contact box2d.B2ContactInterface, impulse *box2d.B2ContactImpulse) {
-	// No-op, required by Box2D interface
-}
+	bodyA := contact.GetFixtureA().GetBody()
+	bodyB := contact.GetFixtureB().GetBody()
 
-func (cl *ContactListener) BeginContact(contact box2d.B2ContactInterface) {
-	// NO MUTEX LOCKING HERE - just queue the collision for processing
-	fixtureA := contact.GetFixtureA()
-	fixtureB := contact.GetFixtureB()
-
-	if fixtureA == nil || fixtureB == nil {
-		return
-	}
-
-	bodyA := fixtureA.GetBody()
-	bodyB := fixtureB.GetBody()
-
-	// Find shapes without locking
 	var shapeA, shapeB *Shape
 	for _, obj := range cl.world.Objects {
 		if obj.Body == bodyA {
@@ -81,12 +66,61 @@ func (cl *ContactListener) BeginContact(contact box2d.B2ContactInterface) {
 		return
 	}
 
-	// Queue collision for safe processing later
+	// Get collision normal to determine direction
+	var worldManifold box2d.B2WorldManifold
+	contact.GetWorldManifold(&worldManifold)
+
+	normal := worldManifold.Normal
+
+	// We care only about mostly vertical collisions
+	if math.Abs(normal.Y) > 0.7 {
+		imp := totalImpulse(*impulse)
+
+		if imp > 0.5 { // ignore soft impacts
+			shapeA.LastCollisionImpulse = imp
+			shapeB.LastCollisionImpulse = imp
+		}
+	}
+}
+
+func totalImpulse(imp box2d.B2ContactImpulse) float64 {
+	n0 := imp.NormalImpulses[0]
+	n1 := imp.NormalImpulses[1]
+	t0 := imp.TangentImpulses[0]
+	t1 := imp.TangentImpulses[1]
+	return n0 + n1 + t0 + t1
+}
+
+func (cl *ContactListener) BeginContact(contact box2d.B2ContactInterface) {
+
+	fixtureA := contact.GetFixtureA()
+	fixtureB := contact.GetFixtureB()
+
+	if fixtureA == nil || fixtureB == nil {
+		return
+	}
+
+	bodyA := fixtureA.GetBody()
+	bodyB := fixtureB.GetBody()
+
+	var shapeA, shapeB *Shape
+	for _, obj := range cl.world.Objects {
+		if obj.Body == bodyA {
+			shapeA = obj
+		} else if obj.Body == bodyB {
+			shapeB = obj
+		}
+	}
+
+	if shapeA == nil || shapeB == nil {
+		return
+	}
+
 	cl.world.queueCollision(shapeA, shapeB)
 }
 
 func (cl *ContactListener) EndContact(contact box2d.B2ContactInterface) {
-	// Similar approach for end contact - no mutex locking
+
 	fixtureA := contact.GetFixtureA()
 	fixtureB := contact.GetFixtureB()
 
@@ -114,27 +148,31 @@ func (cl *ContactListener) EndContact(contact box2d.B2ContactInterface) {
 	shapeB.FinishCollideWith(shapeA)
 }
 
-// Collision event for queuing
 type CollisionEvent struct {
 	ShapeA *Shape
 	ShapeB *Shape
 }
 
-// World represents the game world
+type DrawCommand struct {
+	Type  ShapeType
+	Props *ShapeProps
+}
+
 type World struct {
 	*EventEmitter
 
-	// Display properties
 	Width  int
 	Height int
 
-	// Physics
 	PhysicsWorld    *box2d.B2World
 	contactListener *ContactListener
-	G               Vector2 // Gravity
-	AirResistance   float64 // Air resistance for physics bodies
+	G               Vector2
+	AirResistance   float64
 
-	Screen *ebiten.Image // Screen to draw on
+	Screen *ebiten.Image
+
+	drawCommands []DrawCommand
+	drawMutex    sync.Mutex
 
 	Tick       GameLoop
 	Init       func()
@@ -142,19 +180,15 @@ type World struct {
 	Title      string
 	lastUpdate time.Time
 
-	// Visual properties
 	Pattern    PatternType
 	Background color.Color
 	Border     *Border
 
-	// Game objects
 	Objects []*Shape
 	mutex   sync.RWMutex
 
-	// Audio
 	AudioManager *AudioManager
 
-	// Input
 	Mouse struct {
 		X, Y                          float64
 		IsLeftClicked, IsRightClicked bool
@@ -163,12 +197,10 @@ type World struct {
 	Keys      map[ebiten.Key]bool
 	keysMutex sync.RWMutex
 
-	// State
 	HasLimits bool
 	Paused    bool
 	Cursor    CursorType
 
-	// Callbacks
 	OnMouseDown func(x, y float64)
 	OnMouseUp   func(x, y float64)
 	OnMouseMove func(x, y float64)
@@ -176,13 +208,11 @@ type World struct {
 	Levels       []Level
 	CurrentLevel int
 
-	// Deferred operations
 	pendingLevelSwitch *int
 	collisionQueue     []CollisionEvent
 	collisionMutex     sync.Mutex
 }
 
-// SetTagCollisionFilter sets collision filtering for all shapes with a specific tag
 func (w *World) SetTagCollisionFilter(tag string, collidesWith []string) {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
@@ -192,15 +222,12 @@ func (w *World) SetTagCollisionFilter(tag string, collidesWith []string) {
 		return
 	}
 
-	// Generate a unique group index for this tag
 	groupIndex := int16(w.getTagGroupIndex(tag))
 
-	// If collidesWith is empty, prevent collision with everything
 	if len(collidesWith) == 0 {
-		groupIndex = -groupIndex // Negative group index prevents collision
+		groupIndex = -groupIndex
 	}
 
-	// Apply filter to all shapes with the tag
 	for _, shape := range taggedShapes {
 		if shape.Body != nil {
 			fixture := shape.Body.GetFixtureList()
@@ -212,29 +239,22 @@ func (w *World) SetTagCollisionFilter(tag string, collidesWith []string) {
 		}
 	}
 
-	// If specific tags are provided, set up category/mask filtering
 	if len(collidesWith) > 0 {
 		w.setupCategoryMaskFiltering(tag, collidesWith)
 	}
 }
 
-// setupCategoryMaskFiltering sets up more complex filtering using categories and masks
 func (w *World) setupCategoryMaskFiltering(tag string, collidesWith []string) {
-	// This is a more advanced filtering system using categories and masks
-	// For now, we'll use the simpler group-based approach
 
 	taggedShapes := w.GetElementsByTagName(tag)
 
-	// Create a category bit for this tag
 	categoryBit := uint16(1 << w.getTagCategoryBit(tag))
 
-	// Create mask bits for tags it should collide with
 	maskBits := uint16(0)
 	for _, collidesWithTag := range collidesWith {
 		maskBits |= uint16(1 << w.getTagCategoryBit(collidesWithTag))
 	}
 
-	// Apply the filter
 	for _, shape := range taggedShapes {
 		if shape.Body != nil {
 			fixture := shape.Body.GetFixtureList()
@@ -248,7 +268,6 @@ func (w *World) setupCategoryMaskFiltering(tag string, collidesWith []string) {
 	}
 }
 
-// getTagGroupIndex generates a unique group index for a tag
 func (w *World) getTagGroupIndex(tag string) int {
 	hash := 0
 	for _, char := range tag {
@@ -257,18 +276,16 @@ func (w *World) getTagGroupIndex(tag string) int {
 	return (hash % 32000) + 1
 }
 
-// getTagCategoryBit generates a category bit for a tag (returns the actual bit value, not position)
 func (w *World) getTagCategoryBit(tag string) uint16 {
 	hash := 0
 	for _, char := range tag {
 		hash = hash*31 + int(char)
 	}
-	// Use bits 1-15 (bit 0 is reserved for default)
+
 	bitPosition := (hash % 15) + 1
 	return uint16(1 << bitPosition)
 }
 
-// DisableCollisionBetweenTags disables collision between two tags
 func (w *World) DisableCollisionBetweenTags(tagA, tagB string) {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
@@ -276,7 +293,6 @@ func (w *World) DisableCollisionBetweenTags(tagA, tagB string) {
 	shapesA := w.GetElementsByTagName(tagA)
 	shapesB := w.GetElementsByTagName(tagB)
 
-	// Use our NotCollideWith method for each pair
 	for _, shapeA := range shapesA {
 		for _, shapeB := range shapesB {
 			shapeA.NotCollideWith(shapeB)
@@ -284,7 +300,6 @@ func (w *World) DisableCollisionBetweenTags(tagA, tagB string) {
 	}
 }
 
-// EnableCollisionBetweenTags re-enables collision between two tags
 func (w *World) EnableCollisionBetweenTags(tagA, tagB string) {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
@@ -292,7 +307,6 @@ func (w *World) EnableCollisionBetweenTags(tagA, tagB string) {
 	shapesA := w.GetElementsByTagName(tagA)
 	shapesB := w.GetElementsByTagName(tagB)
 
-	// Use our RestoreCollisionWith method for each pair
 	for _, shapeA := range shapesA {
 		for _, shapeB := range shapesB {
 			shapeA.RestoreCollisionWith(shapeB)
@@ -300,7 +314,6 @@ func (w *World) EnableCollisionBetweenTags(tagA, tagB string) {
 	}
 }
 
-// WorldProps contains properties for creating a world
 type WorldProps struct {
 	Width         int
 	Height        int
@@ -319,13 +332,11 @@ type WorldProps struct {
 	CurrentLevel int
 }
 
-// NewWorld creates a new world
 func NewWorld(props *WorldProps) *World {
 	if props == nil {
 		props = &WorldProps{}
 	}
 
-	// Set defaults
 	if props.Width == 0 {
 		props.Width = 800
 	}
@@ -345,7 +356,6 @@ func NewWorld(props *WorldProps) *World {
 		props.Title = "Life Game"
 	}
 
-	// Create Box2D world
 	contactListener := ContactListener{}
 
 	gravity := box2d.MakeB2Vec2(MetersToPixels(props.G.X), MetersToPixels(props.G.Y))
@@ -377,6 +387,7 @@ func NewWorld(props *WorldProps) *World {
 		CurrentLevel:       0,
 		pendingLevelSwitch: nil,
 		collisionQueue:     make([]CollisionEvent, 0),
+		drawCommands:       make([]DrawCommand, 0),
 	}
 
 	if len(world.Levels) == 0 {
@@ -422,7 +433,87 @@ func NewWorld(props *WorldProps) *World {
 	return world
 }
 
-// queueCollision adds a collision to the processing queue
+func (w *World) Pen(shapeType ShapeType, props *ShapeProps) {
+	w.drawMutex.Lock()
+	defer w.drawMutex.Unlock()
+
+	if props == nil {
+		props = &ShapeProps{}
+	}
+
+	drawProps := *props
+	drawProps.Type = shapeType
+
+	if drawProps.Pattern == "" {
+		drawProps.Pattern = PatternColor
+	}
+	if drawProps.Background == nil {
+		drawProps.Background = color.RGBA{255, 255, 255, 255}
+	}
+	if drawProps.Width == 0 {
+		drawProps.Width = 10
+	}
+	if drawProps.Height == 0 {
+		drawProps.Height = 10
+	}
+	if drawProps.Radius == 0 && shapeType == ShapeCircle {
+		drawProps.Radius = 10
+	}
+
+	w.drawCommands = append(w.drawCommands, DrawCommand{
+		Type:  shapeType,
+		Props: &drawProps,
+	})
+}
+
+func (w *World) Line(x1, y1, x2, y2 float64, lineColor color.Color, thickness float64) {
+	if thickness <= 0 {
+		thickness = 1
+	}
+
+	dx := x2 - x1
+	dy := y2 - y1
+	length := math.Sqrt(dx*dx + dy*dy)
+	angle := math.Atan2(dy, dx)
+
+	centerX := x1 + dx/2
+	centerY := y1 + dy/2
+
+	w.Pen(ShapeRectangle, &ShapeProps{
+		X:          centerX - length/2,
+		Y:          centerY - thickness/2,
+		Width:      length,
+		Height:     thickness,
+		Background: lineColor,
+		Pattern:    PatternColor,
+		Rotation:   angle,
+		ZIndex:     1000,
+	})
+}
+
+func (w *World) Circle(x, y, radius float64, circleColor color.Color) {
+	w.Pen(ShapeCircle, &ShapeProps{
+		X:          x - radius,
+		Y:          y - radius,
+		Radius:     radius,
+		Background: circleColor,
+		Pattern:    PatternColor,
+		ZIndex:     1000,
+	})
+}
+
+func (w *World) Rect(x, y, width, height float64, rectColor color.Color) {
+	w.Pen(ShapeRectangle, &ShapeProps{
+		X:          x,
+		Y:          y,
+		Width:      width,
+		Height:     height,
+		Background: rectColor,
+		Pattern:    PatternColor,
+		ZIndex:     1000,
+	})
+}
+
 func (w *World) queueCollision(shapeA, shapeB *Shape) {
 	w.collisionMutex.Lock()
 	defer w.collisionMutex.Unlock()
@@ -433,20 +524,17 @@ func (w *World) queueCollision(shapeA, shapeB *Shape) {
 	})
 }
 
-// processCollisions handles all queued collisions safely
 func (w *World) processCollisions() {
 	w.collisionMutex.Lock()
 	collisions := make([]CollisionEvent, len(w.collisionQueue))
 	copy(collisions, w.collisionQueue)
-	w.collisionQueue = w.collisionQueue[:0] // Clear the queue
+	w.collisionQueue = w.collisionQueue[:0]
 	w.collisionMutex.Unlock()
 
-	// Process collisions without any mutex locks
 	for _, collision := range collisions {
 		shapeA := collision.ShapeA
 		shapeB := collision.ShapeB
 
-		// Emit collision event
 		w.Emit(EventCollision, EventCollisionData{
 			ShapeA: shapeA,
 			ShapeB: shapeB,
@@ -480,7 +568,6 @@ func (w *World) Destroy() {
 	w.contactListener = nil
 	w.PhysicsWorld = nil
 
-	// Cleanup audio
 	if w.AudioManager != nil {
 		w.AudioManager.Cleanup()
 	}
@@ -499,7 +586,6 @@ func (w *World) SwitchToLevel(levelIndex int) {
 		return
 	}
 
-	// Schedule level switch for after physics step
 	w.pendingLevelSwitch = &levelIndex
 }
 
@@ -508,16 +594,14 @@ func (w *World) SelectLevel(index int) {
 		return
 	}
 
-	// Set current level
 	w.CurrentLevel = index
 	level := w.Levels[index]
 
 	if level.OnDestroy != nil {
-		// Call OnDestroy for the current level
+
 		level.OnDestroy(w)
 	}
 
-	// Clear all existing objects
 	w.mutex.Lock()
 
 	for _, obj := range w.Objects {
@@ -529,7 +613,6 @@ func (w *World) SelectLevel(index int) {
 	w.Objects = make([]*Shape, 0)
 	w.mutex.Unlock()
 
-	// Set up level functions
 	if level.Tick != nil {
 		w.Tick = level.Tick
 	} else {
@@ -542,12 +625,10 @@ func (w *World) SelectLevel(index int) {
 		w.Render = func(screen *ebiten.Image) {}
 	}
 
-	// Initialize the level
 	if level.Init != nil {
 		level.Init(w)
 	}
 
-	// Generate level from map
 	w.GenerateLevelFromMap(level.Map, level.MapItems)
 
 	if level.OnMount != nil {
@@ -649,6 +730,7 @@ func (w *World) Unregister(object *Shape) {
 
 func (w *World) createPhysicsBody(object *Shape) {
 	bodyDef := box2d.MakeB2BodyDef()
+	bodyDef.AllowSleep = true
 
 	if !object.IsBody || object.Tag == "border" {
 		bodyDef.Type = box2d.B2BodyType.B2_staticBody
@@ -660,7 +742,7 @@ func (w *World) createPhysicsBody(object *Shape) {
 		bodyDef.GravityScale = 0
 	}
 
-	bodyDef.FixedRotation = object.RotationLock
+	bodyDef.FixedRotation = false
 
 	centerX := object.X + object.Width/2
 	centerY := object.Y + object.Height/2
@@ -701,11 +783,10 @@ func (w *World) createPhysicsBody(object *Shape) {
 	fixture.SetFriction(object.Friction)
 	fixture.SetRestitution(object.Rebound)
 
-	// Initialize collision filter with default values
 	filter := fixture.GetFilterData()
-	filter.CategoryBits = 1  // Default category
-	filter.MaskBits = 0xFFFF // Collide with everything by default
-	filter.GroupIndex = 0    // No group
+	filter.CategoryBits = 1
+	filter.MaskBits = 0xFFFF
+	filter.GroupIndex = 0
 
 	fixture.SetFilterData(filter)
 
@@ -722,7 +803,7 @@ func (w *World) GenerateLevelFromMap(levelMap Map, objects map[string]func(posit
 	tileWidth := float64(w.Width) / float64(cols)
 	tileHeight := float64(w.Height) / float64(rows)
 
-	const overlap = 0.5 // small value to cover precision gaps
+	const overlap = 0.5
 
 	for y, row := range levelMap {
 		for x, ch := range row {
@@ -731,7 +812,6 @@ func (w *World) GenerateLevelFromMap(levelMap Map, objects map[string]func(posit
 				continue
 			}
 
-			// Slightly overlap tiles to hide gaps
 			pos := Vector2{
 				X: float64(x)*tileWidth - overlap/2,
 				Y: float64(y)*tileHeight - overlap/2,
@@ -755,28 +835,23 @@ func (w *World) Update() error {
 	}
 	w.lastUpdate = now
 
-	// Step physics simulation
 	velocityIterations := 6
 	positionIterations := 3
 	w.PhysicsWorld.Step(deltaTime, velocityIterations, positionIterations)
 
-	// Update audio system
 	if w.AudioManager != nil {
 		w.AudioManager.Update()
 	}
 
-	// Process queued collisions AFTER physics step
 	w.processCollisions()
 
-	// Handle pending level switch AFTER collision processing
 	if w.pendingLevelSwitch != nil {
 		levelIndex := *w.pendingLevelSwitch
 		w.pendingLevelSwitch = nil
 		w.SelectLevel(levelIndex)
-		return nil // Return early after level switch
+		return nil
 	}
 
-	// Update objects
 	w.mutex.RLock()
 	objects := make([]*Shape, len(w.Objects))
 	copy(objects, w.Objects)
@@ -861,22 +936,36 @@ func (w *World) Draw(screen *ebiten.Image) {
 	copy(objects, w.Objects)
 	w.mutex.RUnlock()
 
-	sort.Slice(objects, func(i, j int) bool {
-		if objects[i].Tag == "border" && objects[j].Tag != "border" {
+	w.drawMutex.Lock()
+	drawCommands := make([]DrawCommand, len(w.drawCommands))
+	copy(drawCommands, w.drawCommands)
+	w.drawCommands = w.drawCommands[:0]
+	w.drawMutex.Unlock()
+
+	var tempShapes []*Shape
+	for _, cmd := range drawCommands {
+		tempShape := NewShape(cmd.Props)
+		tempShape.Type = cmd.Type
+		tempShapes = append(tempShapes, tempShape)
+	}
+
+	allShapes := append(objects, tempShapes...)
+
+	sort.Slice(allShapes, func(i, j int) bool {
+		if allShapes[i].Tag == "border" && allShapes[j].Tag != "border" {
 			return true
 		}
-		if objects[i].Tag != "border" && objects[j].Tag == "border" {
+		if allShapes[i].Tag != "border" && allShapes[j].Tag == "border" {
 			return false
 		}
-		return objects[i].ZIndex < objects[j].ZIndex
+		return allShapes[i].ZIndex < allShapes[j].ZIndex
 	})
 
-	for _, obj := range objects {
+	for _, obj := range allShapes {
 		obj.Draw(screen)
 	}
 }
 
-// Audio convenience methods for World
 func (w *World) LoadSound(name string, fs embed.FS, filePath string) error {
 	return w.AudioManager.LoadSoundFromFS(name, fs, filePath)
 }
@@ -909,7 +998,6 @@ func (w *World) ResumeMusic() {
 	w.AudioManager.ResumeMusic()
 }
 
-// Utility methods
 func (w *World) Center(obj *Shape, resetVelocity bool) {
 	obj.SetX(float64(w.Width)/2 - obj.Width/2)
 	obj.SetY(float64(w.Height)/2 - obj.Height/2)
@@ -1044,5 +1132,5 @@ func (w *World) IsKeyPressed(key ebiten.Key) bool {
 }
 
 func (w *World) OncePressed(key ebiten.Key, callback func()) {
-	// Placeholder implementation
+
 }

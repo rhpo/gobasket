@@ -21,12 +21,11 @@ const (
 	playerSpeed = 20
 )
 
-// NewPlayer creates a new player instance
 func NewPlayerEntity(world *life.World, assets embed.FS) *PlayerEntity {
 	imgWidth := 384
 	imgHeight := 832
 
-	spriteSheet, _ := life.LoadImageFromFS(assets, "assets/walk.png") // replace with your file path
+	spriteSheet, _ := life.LoadImageFromFS(assets, "assets/walk.png")
 	sprites := life.ExtractSprites(spriteSheet, float32(imgWidth)/6, float32(imgHeight)/13, 0, 0, 0, 0)
 
 	defaultProps := &life.ShapeProps{
@@ -40,7 +39,7 @@ func NewPlayerEntity(world *life.World, assets embed.FS) *PlayerEntity {
 		Friction:     1,
 		Rebound:      0.2,
 		RotationLock: false,
-		Mass:         100,
+		Mass:         0.01,
 	}
 
 	player := life.NewShape(defaultProps)
@@ -106,15 +105,15 @@ func (playerEntity *PlayerEntity) Update(ld life.LoopData) {
 
 	player := playerEntity.Shape
 
-	if playerEntity.World.IsKeyPressed(ebiten.KeyLeft) {
+	if playerEntity.World.IsKeyPressed(ebiten.KeyA) {
 		player.SetXVelocity(-playerSpeed * 100 * ld.Delta)
-	} else if playerEntity.World.IsKeyPressed(ebiten.KeyRight) {
+	} else if playerEntity.World.IsKeyPressed(ebiten.KeyD) {
 		player.SetXVelocity(playerSpeed * 100 * ld.Delta)
 	} else {
 		playerEntity.SetAnimation("idle")
 	}
 
-	if playerEntity.World.IsKeyPressed(ebiten.KeyUp) && isCollidingWithTag(playerEntity, "ground") {
+	if playerEntity.World.IsKeyPressed(ebiten.KeySpace) && isCollidingWithTag(playerEntity, "ground") {
 		player.Jump(playerSpeed * 80 * ld.Delta)
 		playerEntity.World.PlaySound("jump")
 	}

@@ -11,6 +11,7 @@ type AxisY string
 
 const (
 	EPSILON_DIRECTION_CHANGED = 0
+	EPSILON_STABILISATION     = 1
 
 	DirectionUp    AxisY = "up"
 	DirectionDown  AxisY = "down"
@@ -23,10 +24,9 @@ type Axis struct {
 	Y *AxisY
 }
 
-// Constants and enums
 const (
 	Deg = math.Pi / 180
-	PTM = 8.0 // Pixels to meters ratio
+	PTM = 8.0
 )
 
 func PixelsToMeters(p float64) float64 {
@@ -37,7 +37,6 @@ func MetersToPixels(m float64) float64 {
 	return m * PTM
 }
 
-// Shape types
 type ShapeType string
 
 const (
@@ -49,7 +48,6 @@ const (
 	ShapeDot       ShapeType = "dot"
 )
 
-// Pattern types
 type PatternType string
 
 const (
@@ -59,7 +57,6 @@ const (
 	PatternGradient   PatternType = "gradient"
 )
 
-// Cursor types
 type CursorType string
 
 const (
@@ -70,7 +67,6 @@ const (
 	CursorText      CursorType = "text"
 )
 
-// Utility functions
 func ID() string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 7)

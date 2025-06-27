@@ -8,23 +8,19 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Border represents border properties
 type Border struct {
 	Width      float64
 	Background color.Color
 	Pattern    PatternType
 }
 
-// Helper function to create Box2D vector
 func Box2dVec2(x, y float64) box2d.B2Vec2 {
 	return box2d.MakeB2Vec2(x, y)
 }
 
-// Shape represents a game object
 type Shape struct {
 	*EventEmitter
 
-	// Basic properties
 	ID            string
 	Name          string
 	Tag           string
@@ -42,14 +38,12 @@ type Shape struct {
 	Scale         float64
 	Opacity       float64
 
-	// Visual properties
 	Pattern    PatternType
 	Background color.Color
 	Image      *ebiten.Image
 	Border     *Border
 	Flip       struct{ X, Y bool }
 
-	// Physics properties
 	IsBody   bool
 	Physics  bool
 	Velocity Vector2
@@ -58,42 +52,68 @@ type Shape struct {
 	Friction float64
 	Body     *box2d.B2Body
 
-	// Collision properties
 	CollisionObjects []*Shape
 	CacheDirection   string
 
-	// State
 	Hovered bool
 	Clicked bool
 
-	// Line coordinates (for line shapes)
 	LineCoordinates struct{ X1, Y1, X2, Y2 float64 }
 
-	// Callbacks
 	OnCollisionFunc       func(*Shape)
 	OnFinishCollisionFunc func(*Shape)
 
-	// Reference to world
 	world *World
 
-	// Cached images to prevent color bleeding
 	cachedColorImage *ebiten.Image
 	lastBackground   color.Color
 
 	directions *Axis
-	Ghost      bool // Indicates if the shape is a ghost (not colliding with other shapes)
+	Ghost      bool
 
-	// Collision filtering - simple approach
-	noCollideWith map[string]bool // Track shapes this shouldn't collide with
+	noCollideWith        map[string]bool
+	LastCollisionImpulse float64
 }
 
-// NewShape creates a new shape
+type ShapeProps struct {
+	Type                  ShapeType
+	X, Y                  float64
+	Width, Height         float64
+	Radius                float64
+	ZIndex                int
+	IsBody                bool
+	Pattern               PatternType
+	Background            color.Color
+	Image                 *ebiten.Image
+	Name                  string
+	Rotation              float64
+	RotationLock          bool
+	Tag                   string
+	OnCollisionFunc       func(*Shape)
+	OnFinishCollisionFunc func(*Shape)
+	Physics               bool
+	Rebound               float64
+	Friction              float64
+	Mass                  float64
+	Speed                 float64
+	Velocity              Vector2
+	Border                *Border
+	Flip                  struct{ X, Y bool }
+	Opacity               float64
+	LineCoordinates       struct {
+		A Vector2
+		B Vector2
+	}
+	Ghost                bool
+	Scale                float64
+	LastCollisionImpulse float64
+}
+
 func NewShape(props *ShapeProps) *Shape {
 	if props == nil {
 		props = &ShapeProps{}
 	}
 
-	// Set defaults
 	if props.Type == "" {
 		props.Type = ShapeRectangle
 	}
@@ -166,49 +186,15 @@ func NewShape(props *ShapeProps) *Shape {
 		directions:            &Axis{},
 		Ghost:                 props.Ghost,
 		noCollideWith:         make(map[string]bool),
+		LastCollisionImpulse:  props.LastCollisionImpulse,
 	}
 
-	// Fix: For circles, width and height should be diameter (2 * radius)
 	if props.Radius > 0 && props.Type == ShapeCircle {
 		shape.Width = props.Radius * 2
 		shape.Height = props.Radius * 2
 	}
 
 	return shape
-}
-
-// ShapeProps contains properties for creating a shape
-type ShapeProps struct {
-	Type                  ShapeType
-	X, Y                  float64
-	Width, Height         float64
-	Radius                float64
-	ZIndex                int
-	IsBody                bool
-	Pattern               PatternType
-	Background            color.Color
-	Image                 *ebiten.Image
-	Name                  string
-	Rotation              float64
-	RotationLock          bool
-	Tag                   string
-	OnCollisionFunc       func(*Shape)
-	OnFinishCollisionFunc func(*Shape)
-	Physics               bool
-	Rebound               float64
-	Friction              float64
-	Mass                  float64
-	Speed                 float64
-	Velocity              Vector2
-	Border                *Border
-	Flip                  struct{ X, Y bool }
-	Opacity               float64
-	LineCoordinates       struct {
-		A Vector2
-		B Vector2
-	}
-	Ghost bool // Indicates if the shape is a ghost (not colliding with other shapes)
-	Scale float64
 }
 
 func (s *Shape) Update() {
@@ -309,32 +295,26 @@ func (s *Shape) SetPosition(x, y float64) {
 	s.Body.SetTransform(box2d.MakeB2Vec2(PixelsToMeters(centerX), PixelsToMeters(centerY)), s.RotationAngle)
 }
 
-// SetRotation sets the rotation angle of the shape
 func (s *Shape) SetRotation(angle float64) {
 	s.RotationAngle = angle
 
 	s.Body.SetTransform(s.Body.GetPosition(), angle*Deg)
 }
 
-// SetScale sets the scale of the shape
 func (s *Shape) SetScale(scale float64) {
 	s.Scale = scale
 
-	// Box2D does not support scaling directly, so we need to recreate the body with the new scale
-	// This is a simplified approach; in a real scenario, you would need to destroy the old body and create a new one
 	s.Body.SetTransform(box2d.MakeB2Vec2(PixelsToMeters(s.X), PixelsToMeters(s.Y)), s.RotationAngle*Deg)
 }
 
-// SetBackground updates the background color and invalidates cached images
 func (s *Shape) SetBackground(bg color.Color) {
 	s.Background = bg
-	// Invalidate cached image to force recreation with new color
+
 	s.cachedColorImage = nil
 }
 
-// getColorImage returns a cached color image or creates a new one
 func (s *Shape) getColorImage(width, height int) *ebiten.Image {
-	// Check if we need to create/recreate the cached image
+
 	if s.cachedColorImage == nil || s.lastBackground != s.Background {
 		s.cachedColorImage = ebiten.NewImage(width, height)
 		s.cachedColorImage.Fill(s.Background)
@@ -343,7 +323,6 @@ func (s *Shape) getColorImage(width, height int) *ebiten.Image {
 	return s.cachedColorImage
 }
 
-// Draw renders the shape
 func (s *Shape) Draw(screen *ebiten.Image) {
 
 	if s.Opacity <= 0 {
@@ -373,22 +352,19 @@ func (s *Shape) drawRectangle(screen *ebiten.Image) {
 
 	switch s.Pattern {
 	case PatternColor:
-		// Pretty print s
-		// Use cached color image to prevent color bleeding
+
 		img := s.getColorImage(int(s.Width), int(s.Height))
 
-		// Apply transformations for colored rectangle
 		s.applyTransformations(op, s.Width, s.Height)
 		screen.DrawImage(img, op)
 
 	case PatternImage:
 		if s.Image != nil {
-			// Get original image dimensions
+
 			imgBounds := s.Image.Bounds()
 			imgWidth := float64(imgBounds.Dx())
 			imgHeight := float64(imgBounds.Dy())
 
-			// Apply transformations for image
 			s.applyTransformations(op, imgWidth, imgHeight)
 			screen.DrawImage(s.Image, op)
 		}
@@ -398,7 +374,6 @@ func (s *Shape) drawRectangle(screen *ebiten.Image) {
 func (s *Shape) drawSquare(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
 
-	// For squares, ensure width and height are equal
 	size := s.Width
 	if s.Height > s.Width {
 		size = s.Height
@@ -406,7 +381,7 @@ func (s *Shape) drawSquare(screen *ebiten.Image) {
 
 	switch s.Pattern {
 	case PatternColor:
-		// Use cached color image to prevent color bleeding
+
 		img := s.getColorImage(int(size), int(size))
 
 		s.applyTransformations(op, size, size)
@@ -429,11 +404,10 @@ func (s *Shape) drawCircle(screen *ebiten.Image) {
 
 	switch s.Pattern {
 	case PatternColor:
-		// Create a fresh circle image each time to prevent color bleeding
+
 		size := int(s.Radius * 2)
 		img := ebiten.NewImage(size, size)
 
-		// Simple circle drawing (can be optimized)
 		for y := 0; y < size; y++ {
 			for x := 0; x < size; x++ {
 				dx := float64(x) - s.Radius
@@ -453,7 +427,6 @@ func (s *Shape) drawCircle(screen *ebiten.Image) {
 			imgWidth := float64(imgBounds.Dx())
 			imgHeight := float64(imgBounds.Dy())
 
-			// For circles with images, use the circle's diameter as the target size
 			s.applyTransformations(op, imgWidth, imgHeight)
 			screen.DrawImage(s.Image, op)
 		}
@@ -463,7 +436,6 @@ func (s *Shape) drawCircle(screen *ebiten.Image) {
 func (s *Shape) drawLine(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
 
-	// Create a fresh line image each time
 	img := ebiten.NewImage(int(s.Width), int(s.Height))
 	img.Fill(s.Background)
 
@@ -475,12 +447,15 @@ func (s *Shape) drawDot(screen *ebiten.Image) {
 	s.drawCircle(screen)
 }
 
-// applyTransformations applies all necessary transformations to the DrawImageOptions
 func (s *Shape) applyTransformations(op *ebiten.DrawImageOptions, originalWidth, originalHeight float64) {
-	// Step 1: Move origin to center of the original image
+
 	op.GeoM.Translate(-originalWidth/2, -originalHeight/2)
 
-	// Step 2: Apply flipping
+	// scale := ebiten.Monitor().DeviceScaleFactor()
+	// op.GeoM.Scale(scale, scale)
+
+	op.Filter = ebiten.FilterLinear
+
 	scaleX, scaleY := 1.0, 1.0
 	if s.Flip.X {
 		scaleX = -1.0
@@ -489,33 +464,28 @@ func (s *Shape) applyTransformations(op *ebiten.DrawImageOptions, originalWidth,
 		scaleY = -1.0
 	}
 
-	// Step 3: Scale to match shape dimensions
 	if s.Pattern == PatternImage && s.Image != nil {
-		// Scale image to fit shape dimensions
+
 		scaleX *= s.Width / originalWidth
 		scaleY *= s.Height / originalHeight
 	}
 
-	// Step 4: Apply shape scale
 	scaleX *= s.Scale
 	scaleY *= s.Scale
 
 	op.GeoM.Scale(scaleX, scaleY)
 
-	// Step 5: Apply rotation
 	op.GeoM.Rotate(s.RotationAngle)
 
-	// Step 6: Translate to final position (center of shape)
 	op.GeoM.Translate(s.X+s.Width/2, s.Y+s.Height/2)
 
-	// Step 7: Apply opacity
 	if s.Opacity < 1.0 {
 		op.ColorScale.Scale(1, 1, 1, float32(s.Opacity))
 	}
 }
 
 func (s *Shape) drawBorder(screen *ebiten.Image) {
-	// Border drawing implementation
+
 	borderImg := ebiten.NewImage(int(s.Width+s.Border.Width*2), int(s.Height+s.Border.Width*2))
 	borderImg.Fill(s.Border.Background)
 
@@ -530,7 +500,6 @@ func (s *Shape) MoveTheta(angle float64, optionalSpeed ...float64) {
 		speed = optionalSpeed[0]
 	}
 
-	// Apply force in the specified direction
 	impulse := box2d.MakeB2Vec2(
 		math.Cos(angle*Deg)*speed,
 		math.Sin(angle*Deg)*speed,
@@ -546,16 +515,13 @@ func (s *Shape) Follow(target *Shape) {
 	dy := target.Y - s.Y
 	angle := math.Atan2(dy, dx)
 
-	// Set velocity towards the target
 	s.SetVelocity(math.Cos(angle)*s.Speed, math.Sin(angle)*s.Speed)
 }
 
-// Physics methods
 func (s *Shape) SetVelocity(x, y float64) {
 	s.Body.SetLinearVelocity(box2d.MakeB2Vec2(x, y))
 }
 
-// setXVelocity sets the X component of the velocity
 func (s *Shape) SetXVelocity(x float64) {
 
 	vel := s.Body.GetLinearVelocity()
@@ -564,7 +530,6 @@ func (s *Shape) SetXVelocity(x float64) {
 
 }
 
-// setYVelocity sets the Y component of the velocity
 func (s *Shape) SetYVelocity(y float64) {
 
 	vel := s.Body.GetLinearVelocity()
@@ -604,7 +569,6 @@ func (s *Shape) IsCollidingWith(target *Shape) bool {
 	return false
 }
 
-// Utility methods
 func (s *Shape) Remove() {
 	if s.world != nil {
 		s.world.Unregister(s)
@@ -619,20 +583,18 @@ func (s *Shape) IsOutOfMap() bool {
 }
 
 func (s *Shape) SetProps(props map[string]interface{}) {
-	// Reflection-based property setting could be implemented here
-	// For now, this is a placeholder
+
 }
 
 func (s *Shape) Get(property string) interface{} {
-	// Property getter implementation
+
 	return nil
 }
 
 func (s *Shape) Set(property string, value interface{}) {
-	// Property setter implementation
+
 }
 
-// Movement methods
 func (s *Shape) Move(direction string) {
 	switch direction {
 	case "up":
@@ -646,28 +608,22 @@ func (s *Shape) Move(direction string) {
 	}
 }
 
-// NotCollideWith prevents this shape from colliding with another specific shape
-// This is the SIMPLE approach - just track which shapes shouldn't collide
 func (s *Shape) NotCollideWith(other *Shape) {
 	s.requireInit()
 	other.requireInit()
 
-	// Add to our no-collide list for tracking
 	s.noCollideWith[other.ID] = true
 	other.noCollideWith[s.ID] = true
 }
 
-// RestoreCollisionWith restores collision between this shape and another specific shape
 func (s *Shape) RestoreCollisionWith(other *Shape) {
 	s.requireInit()
 	other.requireInit()
 
-	// Remove from no-collide list
 	delete(s.noCollideWith, other.ID)
 	delete(other.noCollideWith, s.ID)
 }
 
-// NotCollideWithTag prevents this shape from colliding with all shapes that have the specified tag
 func (s *Shape) NotCollideWithTag(tag string) {
 	s.requireInit()
 
@@ -675,16 +631,13 @@ func (s *Shape) NotCollideWithTag(tag string) {
 		return
 	}
 
-	// Get all shapes with the specified tag
 	taggedShapes := s.world.GetElementsByTagName(tag)
 
-	// Apply NotCollideWith to each tagged shape
 	for _, taggedShape := range taggedShapes {
 		s.NotCollideWith(taggedShape)
 	}
 }
 
-// RestoreCollisionWithTag restores collision between this shape and all shapes with the specified tag
 func (s *Shape) RestoreCollisionWithTag(tag string) {
 	s.requireInit()
 
@@ -692,16 +645,13 @@ func (s *Shape) RestoreCollisionWithTag(tag string) {
 		return
 	}
 
-	// Get all shapes with the specified tag
 	taggedShapes := s.world.GetElementsByTagName(tag)
 
-	// Restore collision with each tagged shape
 	for _, taggedShape := range taggedShapes {
 		s.RestoreCollisionWith(taggedShape)
 	}
 }
 
-// ShouldCollideWith checks if this shape should collide with another shape
 func (s *Shape) ShouldCollideWith(other *Shape) bool {
 	return !s.noCollideWith[other.ID]
 }

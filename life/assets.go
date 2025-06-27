@@ -10,7 +10,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// LoadImage loads an image from a file
 func LoadImage(path string) (*ebiten.Image, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -63,7 +62,6 @@ func ExtractSprites(sheet *ebiten.Image, spriteWidth, spriteHeight, marginX, mar
 	return frames
 }
 
-// PreSuffixedRange creates a map of strings with prefix and suffix
 func PreSuffixedRange(prefix, suffix string, start, end int) map[int]string {
 	result := make(map[int]string)
 	for i := start; i <= end; i++ {
@@ -72,7 +70,6 @@ func PreSuffixedRange(prefix, suffix string, start, end int) map[int]string {
 	return result
 }
 
-// SpriteSheet represents a sprite sheet
 type SpriteSheet struct {
 	Image       *ebiten.Image
 	FrameWidth  int
@@ -80,7 +77,6 @@ type SpriteSheet struct {
 	Frames      []*ebiten.Image
 }
 
-// NewSpriteSheet creates a new sprite sheet
 func NewSpriteSheet(imagePath string, frameWidth, frameHeight int) (*SpriteSheet, error) {
 	img, err := LoadImage(imagePath)
 	if err != nil {
@@ -93,7 +89,6 @@ func NewSpriteSheet(imagePath string, frameWidth, frameHeight int) (*SpriteSheet
 		FrameHeight: frameHeight,
 	}
 
-	// Extract frames
 	bounds := img.Bounds()
 	cols := bounds.Dx() / frameWidth
 	rows := bounds.Dy() / frameHeight
@@ -111,7 +106,6 @@ func NewSpriteSheet(imagePath string, frameWidth, frameHeight int) (*SpriteSheet
 	return sheet, nil
 }
 
-// GetFrame returns a specific frame from the sprite sheet
 func (s *SpriteSheet) GetFrame(index int) *ebiten.Image {
 	if index < 0 || index >= len(s.Frames) {
 		return nil
@@ -119,7 +113,6 @@ func (s *SpriteSheet) GetFrame(index int) *ebiten.Image {
 	return s.Frames[index]
 }
 
-// GetFrames returns a slice of frames
 func (s *SpriteSheet) GetFrames(start, end int) []*ebiten.Image {
 	if start < 0 || end >= len(s.Frames) || start > end {
 		return nil
